@@ -13,7 +13,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,29 +25,51 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.AccountCircle
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Card
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.work.OneTimeWorkRequestBuilder
@@ -54,14 +78,17 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import coil.compose.rememberImagePainter
 import com.example.no9studio.filters.FilterType
+import com.example.no9studio.model.NavigationItem
 import com.example.no9studio.model.Picture
 import com.example.no9studio.ui.theme.NO9StudioTheme
 import com.example.no9studio.worker.ImageFilterWorker
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private var selectedImageUri by mutableStateOf<Uri?>(null)
     private var isLoading by mutableStateOf(false)
-    private var loadingProgress by mutableStateOf(0)
 
 
     private val galleryLauncher: ActivityResultLauncher<Intent> =
@@ -74,6 +101,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -83,42 +111,106 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
+                    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+                    val scope = rememberCoroutineScope()
+                    val navItems = getNavigationItems()
+                    var selectedItemIndex  by rememberSaveable {
+                        mutableStateOf(0)
+                    }
+                    ModalNavigationDrawer(
+                        drawerContent = {
+                                        ModalDrawerSheet {
+                                            Spacer(modifier = Modifier.height(26.dp))
+                                            navItems.forEachIndexed { index, navigationItem ->
+                                                NavigationDrawerItem(
+                                                    label = {
+                                                            Text(text = navigationItem.title)
+                                                    },
+                                                    selected = index == selectedItemIndex ,
+                                                    onClick = {
+                                                        selectedItemIndex = index
+                                                        scope.launch {
+                                                            drawerState.close()
+                                                        }
+                                                    },
+                                                    icon = {
+                                                        Icon(
+                                                            imageVector = if (index == selectedItemIndex) { navigationItem.selectedIcon } else navigationItem.unselectedIcon,
+                                                            contentDescription = navigationItem.title
+                                                        )
+                                                    }
+                                                )
+                                            }
+
+                                        }
+                        },
+                        drawerState = drawerState
                     ) {
-                        NO9Toolbar(
-                            title = "Home",
-                            onActionClick = {
-                                openGallery()
+                        Scaffold(
+                            topBar = {
+                                NO9Toolbar(
+                                    title = "Home",
+                                    onActionClick = {
+                                        openGallery()
+                                    },
+                                    onNavigationIconClick = {
+                                        scope.launch {
+                                            drawerState.open()
+                                        }
+                                    }
+                                )
                             },
-                        )
-                        Column(
-                           // modifier = Modifier.fillMaxHeight(),
-                            verticalArrangement = if (selectedImageUri != null){ Arrangement.Center} else Arrangement.Top
-                        ) {
-                            NO9StudioApp(selectedImage = selectedImageUri, isLoading, loadingProgress)
-                        }
-                        if (selectedImageUri != null){
-                            Toast.makeText(this@MainActivity, "why?? show na!", Toast.LENGTH_SHORT).show()
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.Bottom
-                            ) {
-                                FilterGallery(
-                                    selectedImage = selectedImageUri,
-                                ) {
-                                    filterType ->
-                                    applyFilters(selectedImageUri!!, FilterType.valueOf(filterType))
+                            bottomBar = {
+                                if (selectedImageUri != null) {
+                                    FilterGallery(
+                                        selectedImage = selectedImageUri,
+                                        onActionClick = {
+                                            applyFilters(selectedImageUri!!, FilterType.valueOf(it))
+                                        })
                                 }
                             }
+                        ) {
+                            Column(
+                                // modifier = Modifier.fillMaxHeight(),
+                                modifier = Modifier
+                                    .padding(10.dp)
+                                    .padding(it),
+                                verticalArrangement = if (selectedImageUri != null){ Arrangement.Center} else Arrangement.Top
+                            ) {
+                                NO9StudioApp(selectedImage = selectedImageUri, isLoading)
+                            }
+                            if (selectedImageUri != null){
+                                Toast.makeText(this@MainActivity, "why?? show na!", Toast.LENGTH_SHORT).show()
+                            }
                         }
-
-
                     }
+
 
                 }
             }
         }
+    }
+
+    
+
+    private fun getNavigationItems() : List<NavigationItem> {
+        return listOf(
+            NavigationItem(
+                title = "All",
+                selectedIcon = Icons.Filled.Home,
+                unselectedIcon = Icons.Outlined.Home,
+            ),
+            NavigationItem(
+                title = "Crop",
+                selectedIcon = Icons.Filled.AccountCircle,
+                unselectedIcon = Icons.Outlined.AccountCircle
+            ),
+            NavigationItem(
+                title = "Settings",
+                selectedIcon = Icons.Filled.Settings,
+                unselectedIcon = Icons.Outlined.Settings,
+            )
+        )
     }
 
     private fun openGallery() {
@@ -128,7 +220,6 @@ class MainActivity : ComponentActivity() {
 
     private fun applyFilters(inputUri: Uri, filterType: FilterType) {
         val workManager = WorkManager.getInstance(this)
-
 
         val inputData = workDataOf(
             ImageFilterWorker.KEY_INPUT_URI to inputUri.toString(),
@@ -144,49 +235,47 @@ class MainActivity : ComponentActivity() {
         // Observe the work status
         workManager.getWorkInfoByIdLiveData(workRequest.id)
             .observe(this) { workInfo ->
-              val progress =  workInfo.progress.getInt("progress", 0)
+
                 when (workInfo.state) {
                     WorkInfo.State.ENQUEUED -> {
-                        startLoadingAnimation(true, progress)
+                        startLoadingAnimation(true)
                     }
-
                     WorkInfo.State.RUNNING -> {
-                        startLoadingAnimation(true, progress)
+                        startLoadingAnimation(true)
                     }
-
                     WorkInfo.State.SUCCEEDED -> {
                         val outputUriString =
                             workInfo.outputData.getString(ImageFilterWorker.KEY_FILTERED_URI)
                         val outputUri = Uri.parse(outputUriString)
                         // Do something with the filtered image URI
                         selectedImageUri = outputUri
-                        startLoadingAnimation(false, progress)
+                        startLoadingAnimation(false)
                     }
-
                     WorkInfo.State.FAILED -> {
-                        startLoadingAnimation(false, progress)
+                        startLoadingAnimation(false)
                     }
-
                     WorkInfo.State.BLOCKED -> TODO()
                     WorkInfo.State.CANCELLED -> TODO()
                 }
             }
     }
 
-    private fun startLoadingAnimation(b: Boolean, progress: Int?) {
+    private fun startLoadingAnimation(b: Boolean) {
        isLoading = b
-        progress?.let {
-            loadingProgress = it
-        }
     }
 
 }
 
 
 @Composable
-fun LoadingAnimation(isLoading: Boolean, progress: Int? = null) {
+fun LoadingAnimation( isLoading: Boolean) {
+    val loadingState by rememberUpdatedState(isLoading)
 
-    if (isLoading) {
+    val animatedOffset by animateFloatAsState(
+        targetValue = if (loadingState) 1f else 0f
+    )
+
+    if (loadingState) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.Center,
@@ -195,14 +284,14 @@ fun LoadingAnimation(isLoading: Boolean, progress: Int? = null) {
                 LinearProgressIndicator(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(8.dp),
-                    progress = if (progress != null) progress.toFloat() / 100 else 0f
+                        .height(8.dp)
+                        .background(color = Color.Gray)
+                        .offset(x = (animatedOffset).dp)
                 )
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(10.dp))
                 Text("Applying filter...")
             }
         }
-
 }
 
 @Composable
@@ -223,8 +312,8 @@ fun FilterGallery(selectedImage: Uri?, onActionClick: (String) -> Unit){
     val filterTypeList: List<FilterType> = FilterType.values().toList()
 
     LazyRow(modifier = Modifier
-        .padding(3.dp)
-        .fillMaxSize()) {
+        .padding(5.dp)
+        .fillMaxWidth()) {
       items(filterTypeList.size) {
           ImageFilter(selectedImage,filterTypeList[it],onActionClick)
       }
@@ -233,23 +322,30 @@ fun FilterGallery(selectedImage: Uri?, onActionClick: (String) -> Unit){
 
 @Composable
 fun ImageFilter(selectedImage: Uri?, filterType: FilterType, onClick: (String) -> Unit){
-    Box(
-        modifier = Modifier.clickable {onClick(filterType.name)}
-    ) {
+    Card(
+        modifier = Modifier
+            .width(120.dp).padding(8.dp).clickable {onClick(filterType.name)},
+        shape = RoundedCornerShape(0.dp),
+    ){
         Image(
-            painter = rememberImagePainter(data = selectedImage),
-            contentDescription = null
-        )
+                painter = rememberImagePainter(data = selectedImage),
+                contentDescription = null,
+                modifier = Modifier.width(64.dp).height(64.dp),
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.Center,
+                )
         Text(
-            text = filterType.name,
-            color = MaterialTheme.colorScheme.onPrimaryContainer
-        )
+                text = filterType.name.lowercase(Locale.getDefault()),
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                textAlign = TextAlign.Center
+                )
     }
+    Spacer(modifier = Modifier.width(5.dp))
 
 }
 
 @Composable
-fun NO9StudioApp(selectedImage : Uri?, isLoading: Boolean, progress: Int?) {
+fun NO9StudioApp(selectedImage : Uri?, isLoading: Boolean) {
     // Fetch recent pictures from the device
     val recentPictures = getRecentPictures()
     if (selectedImage == null){
@@ -263,12 +359,11 @@ fun NO9StudioApp(selectedImage : Uri?, isLoading: Boolean, progress: Int?) {
         }
     } else{
         Toast.makeText(LocalContext.current,"Image is not null", Toast.LENGTH_SHORT).show()
-       Box(){
-           SelectedImage(imageUri = selectedImage)
-           LoadingAnimation(isLoading = isLoading, progress)
+       Box {
+           SelectedImage( imageUri = selectedImage)
+           LoadingAnimation( isLoading = isLoading)
        }
     }
-
 }
 @Composable
 fun RecentPictureItem(picture: Picture) {
@@ -346,7 +441,8 @@ fun getRecentPictures(): List<Picture> {
 @Composable
 fun NO9Toolbar(
     title: String,
-    onActionClick: () -> Unit
+    onActionClick: () -> Unit,
+    onNavigationIconClick: () -> Job
 ) {
     TopAppBar(
         title = {
@@ -356,10 +452,17 @@ fun NO9Toolbar(
             IconButton(onClick = { onActionClick() }) {
                 Icon(Icons.Default.Add, contentDescription = "Add")
             }
+        },
+        navigationIcon = {
+            IconButton(onClick = { onNavigationIconClick() }) {
+                Icon(
+                    imageVector = Icons.Default.Menu,
+                    contentDescription = "menu"
+                )
+            }
         }
     )
 }
-
 
 
 @Preview(showBackground = true)

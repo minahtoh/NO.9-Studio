@@ -32,7 +32,6 @@ class ImageFilterWorker(context: Context, workerParams: WorkerParameters)
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.Default) {
-            val totalWork = 100
             val inputUriString = inputData.getString(KEY_INPUT_URI)
             val filterTypeString = inputData.getString(KEY_FILTER_TYPE)
             var filteredBitmap : Bitmap? = null
@@ -41,15 +40,9 @@ class ImageFilterWorker(context: Context, workerParams: WorkerParameters)
             val inputUri = Uri.parse(inputUriString)
             val filterType = FilterType.valueOf(filterTypeString)
 
-           //val originalBitmap = BitmapFactory.decodeFile(inputUri.toFile().absolutePath)
             val originalBitmap = loadBitmapFromUri(applicationContext,inputUri)
 
-
-            for (i in 0 until totalWork){
-                filteredBitmap = originalBitmap?.let { applyFilter(it, filterType) }
-                setProgress(workDataOf("progress" to (i + 1)))
-            }
-
+            filteredBitmap = originalBitmap?.let { applyFilter(it, filterType) }
 
             // Save both original and filtered images
             val originalUri = originalBitmap?.let { saveBitmap(it, "original") }
