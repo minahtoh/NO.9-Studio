@@ -13,9 +13,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.activity.viewModels
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,9 +24,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -47,7 +44,6 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -61,12 +57,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
@@ -80,7 +74,11 @@ import coil.compose.rememberImagePainter
 import com.example.no9studio.filters.FilterType
 import com.example.no9studio.model.NavigationItem
 import com.example.no9studio.model.Picture
+import com.example.no9studio.navigation.AppNavigation
+import com.example.no9studio.ui.common.LoadingAnimation
+import com.example.no9studio.ui.common.getNavigationItems
 import com.example.no9studio.ui.theme.NO9StudioTheme
+import com.example.no9studio.viewmodel.StudioViewModel
 import com.example.no9studio.worker.ImageFilterWorker
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -89,6 +87,7 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
     private var selectedImageUri by mutableStateOf<Uri?>(null)
     private var isLoading by mutableStateOf(false)
+    private val viewModel : StudioViewModel by viewModels()
 
 
     private val galleryLauncher: ActivityResultLauncher<Intent> =
@@ -96,122 +95,25 @@ class MainActivity : ComponentActivity() {
             if (result.resultCode == Activity.RESULT_OK) {
                    result.data?.data?.let { uri ->
                     // Handle the selected image URI
-                    selectedImageUri = uri
+                   // selectedImageUri = uri
+                       viewModel.selectImageForFilter(uri)
                    }
             }
         }
 
-    @OptIn(ExperimentalMaterial3Api::class)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             NO9StudioTheme {
-                // A surface container using the 'background' color from the theme
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-                    val scope = rememberCoroutineScope()
-                    val navItems = getNavigationItems()
-                    var selectedItemIndex  by rememberSaveable {
-                        mutableStateOf(0)
-                    }
-                    ModalNavigationDrawer(
-                        drawerContent = {
-                                        ModalDrawerSheet {
-                                            Spacer(modifier = Modifier.height(26.dp))
-                                            navItems.forEachIndexed { index, navigationItem ->
-                                                NavigationDrawerItem(
-                                                    label = {
-                                                            Text(text = navigationItem.title)
-                                                    },
-                                                    selected = index == selectedItemIndex ,
-                                                    onClick = {
-                                                        selectedItemIndex = index
-                                                        scope.launch {
-                                                            drawerState.close()
-                                                        }
-                                                    },
-                                                    icon = {
-                                                        Icon(
-                                                            imageVector = if (index == selectedItemIndex) { navigationItem.selectedIcon } else navigationItem.unselectedIcon,
-                                                            contentDescription = navigationItem.title
-                                                        )
-                                                    }
-                                                )
-                                            }
-
-                                        }
-                        },
-                        drawerState = drawerState
-                    ) {
-                        Scaffold(
-                            topBar = {
-                                NO9Toolbar(
-                                    title = "Home",
-                                    onActionClick = {
-                                        openGallery()
-                                    },
-                                    onNavigationIconClick = {
-                                        scope.launch {
-                                            drawerState.open()
-                                        }
-                                    }
-                                )
-                            },
-                            bottomBar = {
-                                if (selectedImageUri != null) {
-                                    FilterGallery(
-                                        selectedImage = selectedImageUri,
-                                        onActionClick = {
-                                            applyFilters(selectedImageUri!!, FilterType.valueOf(it))
-                                        })
-                                }
-                            }
-                        ) {
-                            Column(
-                                // modifier = Modifier.fillMaxHeight(),
-                                modifier = Modifier
-                                    .padding(10.dp)
-                                    .padding(it),
-                                verticalArrangement = if (selectedImageUri != null){ Arrangement.Center} else Arrangement.Top
-                            ) {
-                                NO9StudioApp(selectedImage = selectedImageUri, isLoading)
-                            }
-                            if (selectedImageUri != null){
-                                Toast.makeText(this@MainActivity, "why?? show na!", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    }
-
-
-                }
+                AppNavigation(
+                    viewModel = viewModel,
+                    openGalleryAction = { openGallery() }
+                )
             }
         }
     }
 
-    
-
-    private fun getNavigationItems() : List<NavigationItem> {
-        return listOf(
-            NavigationItem(
-                title = "All",
-                selectedIcon = Icons.Filled.Home,
-                unselectedIcon = Icons.Outlined.Home,
-            ),
-            NavigationItem(
-                title = "Crop",
-                selectedIcon = Icons.Filled.AccountCircle,
-                unselectedIcon = Icons.Outlined.AccountCircle
-            ),
-            NavigationItem(
-                title = "Settings",
-                selectedIcon = Icons.Filled.Settings,
-                unselectedIcon = Icons.Outlined.Settings,
-            )
-        )
-    }
 
     private fun openGallery() {
         val galleryIntent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
@@ -267,32 +169,94 @@ class MainActivity : ComponentActivity() {
 }
 
 
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LoadingAnimation( isLoading: Boolean) {
-    val loadingState by rememberUpdatedState(isLoading)
+fun StudioHome(
+    selectedImageUri: Uri?,
+    openGallery : () -> Unit,
+    applyFilters : (FilterType) -> Unit,
+    onNavigationItemClick: (String) -> Unit,
+    isLoading: Boolean
+){
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    val navItems = getNavigationItems()
+    var selectedNavItemIndex  by rememberSaveable {
+        mutableStateOf(0)
+    }
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        ModalNavigationDrawer(
+            drawerContent = {
+                ModalDrawerSheet {
+                    Spacer(modifier = Modifier.height(26.dp))
+                    navItems.forEachIndexed { index, navigationItem ->
+                        NavigationDrawerItem(
+                            label = {
+                                Text(text = navigationItem.title)
+                            },
+                            selected = index == selectedNavItemIndex ,
+                            onClick = {
+                                selectedNavItemIndex = index
+                                onNavigationItemClick(navigationItem.route)
+                                scope.launch {
+                                    drawerState.close()
+                                }
+                            },
+                            icon = {
+                                Icon(
+                                    imageVector = if (index == selectedNavItemIndex) { navigationItem.selectedIcon } else navigationItem.unselectedIcon,
+                                    contentDescription = navigationItem.title
+                                )
+                            }
+                        )
+                    }
 
-    val animatedOffset by animateFloatAsState(
-        targetValue = if (loadingState) 1f else 0f
-    )
-
-    if (loadingState) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
+                }
+            },
+            drawerState = drawerState
+        ) {
+            Scaffold(
+                topBar = {
+                    NO9Toolbar(
+                        title = "Home",
+                        onActionClick = {
+                            openGallery()
+                        },
+                        onNavigationIconClick = {
+                            scope.launch {
+                                drawerState.open()
+                            }
+                        }
+                    )
+                },
+                bottomBar = {
+                    if (selectedImageUri != null) {
+                        FilterGallery(
+                            selectedImage = selectedImageUri,
+                            onActionClick = {
+                                applyFilters(FilterType.valueOf(it))
+                            })
+                    }
+                }
             ) {
-                LinearProgressIndicator(
+                Column(
+                    // modifier = Modifier.fillMaxHeight(),
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .background(color = Color.Gray)
-                        .offset(x = (animatedOffset).dp)
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                Text("Applying filter...")
+                        .padding(10.dp)
+                        .padding(it),
+                    verticalArrangement = if (selectedImageUri != null){ Arrangement.Center} else Arrangement.Top
+                ) {
+                    NO9StudioApp(selectedImage = selectedImageUri, isLoading)
+                }
             }
         }
+    }
 }
+
 
 @Composable
 fun SelectedImage(imageUri : Uri){
@@ -324,13 +288,17 @@ fun FilterGallery(selectedImage: Uri?, onActionClick: (String) -> Unit){
 fun ImageFilter(selectedImage: Uri?, filterType: FilterType, onClick: (String) -> Unit){
     Card(
         modifier = Modifier
-            .width(120.dp).padding(8.dp).clickable {onClick(filterType.name)},
+            .width(120.dp)
+            .padding(8.dp)
+            .clickable { onClick(filterType.name) },
         shape = RoundedCornerShape(0.dp),
     ){
         Image(
                 painter = rememberImagePainter(data = selectedImage),
                 contentDescription = null,
-                modifier = Modifier.width(64.dp).height(64.dp),
+                modifier = Modifier
+                    .width(64.dp)
+                    .height(64.dp),
                 contentScale = ContentScale.Crop,
                 alignment = Alignment.Center,
                 )
@@ -361,7 +329,7 @@ fun NO9StudioApp(selectedImage : Uri?, isLoading: Boolean) {
         Toast.makeText(LocalContext.current,"Image is not null", Toast.LENGTH_SHORT).show()
        Box {
            SelectedImage( imageUri = selectedImage)
-           LoadingAnimation( isLoading = isLoading)
+           LoadingAnimation( isLoading = isLoading, description = "Applying Filters...")
        }
     }
 }
