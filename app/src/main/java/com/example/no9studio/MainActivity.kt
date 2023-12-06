@@ -3,7 +3,9 @@ package com.example.no9studio
 import android.app.Activity
 import android.content.ContentResolver
 import android.content.ContentUris
+import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
@@ -16,9 +18,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,14 +32,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.outlined.AccountCircle
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -66,29 +61,27 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkInfo
-import androidx.work.WorkManager
-import androidx.work.workDataOf
 import coil.compose.rememberImagePainter
+import com.canhub.cropper.CropImageContract
+import com.canhub.cropper.CropImageView
+import com.canhub.cropper.options
 import com.example.no9studio.filters.FilterType
-import com.example.no9studio.model.NavigationItem
+import com.example.no9studio.model.CropRatio
 import com.example.no9studio.model.Picture
 import com.example.no9studio.navigation.AppNavigation
+import com.example.no9studio.navigation.Screen
 import com.example.no9studio.ui.common.LoadingAnimation
+import com.example.no9studio.ui.common.getCropRatios
 import com.example.no9studio.ui.common.getNavigationItems
 import com.example.no9studio.ui.theme.NO9StudioTheme
 import com.example.no9studio.viewmodel.StudioViewModel
-import com.example.no9studio.worker.ImageFilterWorker
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
-    private var selectedImageUri by mutableStateOf<Uri?>(null)
-    private var isLoading by mutableStateOf(false)
-    private val viewModel : StudioViewModel by viewModels()
 
+    private val viewModel : StudioViewModel by viewModels()
 
     private val galleryLauncher: ActivityResultLauncher<Intent> =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -101,6 +94,19 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+    private val cropActivityResultLauncher = registerForActivityResult(CropImageContract()){
+        result ->
+        if (result.isSuccessful){
+            val croppedImage = result.uriContent
+            if (croppedImage != null){
+                viewModel.selectImageForFilter(croppedImage)
+            }
+        }else{
+            Toast.makeText(this,"Crop image failed due to ${result.error}",Toast.LENGTH_SHORT)
+                .show()
+        }
+    }
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -108,7 +114,12 @@ class MainActivity : ComponentActivity() {
             NO9StudioTheme {
                 AppNavigation(
                     viewModel = viewModel,
-                    openGalleryAction = { openGallery() }
+                    openGalleryAction = { openGallery() },
+                    cropImageAction = {
+                        val cropRatio = CropRatio.getCropRatioByName(it)
+                        val imageToCrop = viewModel.selectedImageUri.value
+                        cropImage(imageToCrop, cropRatio)
+                    }
                 )
             }
         }
@@ -120,50 +131,17 @@ class MainActivity : ComponentActivity() {
         galleryLauncher.launch(galleryIntent)
     }
 
-    private fun applyFilters(inputUri: Uri, filterType: FilterType) {
-        val workManager = WorkManager.getInstance(this)
-
-        val inputData = workDataOf(
-            ImageFilterWorker.KEY_INPUT_URI to inputUri.toString(),
-            ImageFilterWorker.KEY_FILTER_TYPE to filterType.name
-        )
-
-        val workRequest = OneTimeWorkRequestBuilder<ImageFilterWorker>()
-            .setInputData(inputData)
-            .build()
-
-        workManager.enqueue(workRequest)
-
-        // Observe the work status
-        workManager.getWorkInfoByIdLiveData(workRequest.id)
-            .observe(this) { workInfo ->
-
-                when (workInfo.state) {
-                    WorkInfo.State.ENQUEUED -> {
-                        startLoadingAnimation(true)
-                    }
-                    WorkInfo.State.RUNNING -> {
-                        startLoadingAnimation(true)
-                    }
-                    WorkInfo.State.SUCCEEDED -> {
-                        val outputUriString =
-                            workInfo.outputData.getString(ImageFilterWorker.KEY_FILTERED_URI)
-                        val outputUri = Uri.parse(outputUriString)
-                        // Do something with the filtered image URI
-                        selectedImageUri = outputUri
-                        startLoadingAnimation(false)
-                    }
-                    WorkInfo.State.FAILED -> {
-                        startLoadingAnimation(false)
-                    }
-                    WorkInfo.State.BLOCKED -> TODO()
-                    WorkInfo.State.CANCELLED -> TODO()
+    private fun cropImage(imageUri: Uri?, cropRatio: CropRatio?){
+        cropActivityResultLauncher.launch(
+            options(uri = imageUri){
+                setGuidelines(CropImageView.Guidelines.ON)
+                setOutputCompressFormat(Bitmap.CompressFormat.PNG)
+                if (cropRatio?.AspectX != null && cropRatio.AspectY != null){
+                    setAspectRatio(cropRatio.AspectX,cropRatio.AspectY)
                 }
+                setOutputCompressQuality(100)
             }
-    }
-
-    private fun startLoadingAnimation(b: Boolean) {
-       isLoading = b
+        )
     }
 
 }
@@ -172,12 +150,14 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StudioHome(
+fun StudioBaseScreen(
     selectedImageUri: Uri?,
     openGallery : () -> Unit,
     applyFilters : (FilterType) -> Unit,
     onNavigationItemClick: (String) -> Unit,
-    isLoading: Boolean
+    currentScreen : Screen,
+    cropImageToRatio : (String) -> Unit,
+    content: @Composable (PaddingValues) -> Unit,
 ){
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -234,25 +214,25 @@ fun StudioHome(
                     )
                 },
                 bottomBar = {
-                    if (selectedImageUri != null) {
+                    Log.d("CurrentScreen", "StudioBaseScreen: $currentScreen")
+                    if (selectedImageUri != null && currentScreen == Screen.Home) {
                         FilterGallery(
                             selectedImage = selectedImageUri,
                             onActionClick = {
                                 applyFilters(FilterType.valueOf(it))
-                            })
+                            }
+                        )
+                    }else if (selectedImageUri != null && currentScreen == Screen.Crop){
+                        CropGallery(
+                            selectedImage = selectedImageUri,
+                            onActionClick = cropImageToRatio
+                        )
                     }
+                },
+                content = {
+                    content(it)
                 }
-            ) {
-                Column(
-                    // modifier = Modifier.fillMaxHeight(),
-                    modifier = Modifier
-                        .padding(10.dp)
-                        .padding(it),
-                    verticalArrangement = if (selectedImageUri != null){ Arrangement.Center} else Arrangement.Top
-                ) {
-                    NO9StudioApp(selectedImage = selectedImageUri, isLoading)
-                }
-            }
+            )
         }
     }
 }
@@ -274,23 +254,34 @@ fun SelectedImage(imageUri : Uri){
 fun FilterGallery(selectedImage: Uri?, onActionClick: (String) -> Unit){
 
     val filterTypeList: List<FilterType> = FilterType.values().toList()
-
     LazyRow(modifier = Modifier
         .padding(5.dp)
         .fillMaxWidth()) {
       items(filterTypeList.size) {
-          ImageFilter(selectedImage,filterTypeList[it],onActionClick)
+          ImageFilter(selectedImage,filterTypeList[it].name,onActionClick)
       }
     }
 }
 
 @Composable
-fun ImageFilter(selectedImage: Uri?, filterType: FilterType, onClick: (String) -> Unit){
+fun CropGallery(selectedImage: Uri?, onActionClick: (String) -> Unit){
+    val cropTypeList = getCropRatios()
+    LazyRow(modifier = Modifier
+        .padding(5.dp)
+        .fillMaxWidth()) {
+        items(cropTypeList.size) {
+            ImageFilter(selectedImage,cropTypeList[it].name,onActionClick)
+        }
+    }
+}
+
+@Composable
+fun ImageFilter(selectedImage: Uri?, filterType: String, onClick: (String) -> Unit){
     Card(
         modifier = Modifier
             .width(120.dp)
             .padding(8.dp)
-            .clickable { onClick(filterType.name) },
+            .clickable { onClick(filterType) },
         shape = RoundedCornerShape(0.dp),
     ){
         Image(
@@ -303,7 +294,7 @@ fun ImageFilter(selectedImage: Uri?, filterType: FilterType, onClick: (String) -
                 alignment = Alignment.Center,
                 )
         Text(
-                text = filterType.name.lowercase(Locale.getDefault()),
+                text = filterType.lowercase(Locale.getDefault()),
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                 textAlign = TextAlign.Center
                 )
@@ -313,20 +304,31 @@ fun ImageFilter(selectedImage: Uri?, filterType: FilterType, onClick: (String) -
 }
 
 @Composable
-fun NO9StudioApp(selectedImage : Uri?, isLoading: Boolean) {
+fun NO9StudioApp(
+    selectedImage : Uri?,
+    isLoading: Boolean,
+    selectImageForFilter : (Picture) -> Unit
+) {
+    val context = LocalContext.current
     // Fetch recent pictures from the device
-    val recentPictures = getRecentPictures()
+    val recentPictures = getRecentPictures(context)
     if (selectedImage == null){
         // Display the list of recent pictures using LazyColumn
         LazyVerticalGrid(
-            columns = GridCells.Fixed(3)
+            columns = GridCells.Fixed(3),
         ) {
             items(recentPictures.size) {
-                RecentPictureItem(picture = recentPictures[it])
+                Surface(
+                    modifier = Modifier.clickable {
+                        selectImageForFilter(recentPictures[it])
+                    }
+                ) {
+                    RecentPictureItem(picture = recentPictures[it])
+                }
             }
         }
     } else{
-        Toast.makeText(LocalContext.current,"Image is not null", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context,"Image is not null", Toast.LENGTH_SHORT).show()
        Box {
            SelectedImage( imageUri = selectedImage)
            LoadingAnimation( isLoading = isLoading, description = "Applying Filters...")
@@ -352,9 +354,10 @@ fun RecentPictureItem(picture: Picture) {
     }
 }
 
-@Composable
-fun getRecentPictures(): List<Picture> {
-    val contentResolver: ContentResolver = LocalContext.current.contentResolver
+
+fun getRecentPictures(context: Context): List<Picture> {
+
+    val contentResolver : ContentResolver = context.contentResolver
 
     // Define the columns you want to retrieve from the MediaStore
     val projection = arrayOf(
@@ -394,16 +397,11 @@ fun getRecentPictures(): List<Picture> {
 
             Log.d("ImageInfo", "Display Name: $displayName, Content URI: $contentUri")
 
-           // pictures.add(Picture(contentUri))
+            pictures.add(Picture(contentUri))
         }
     }
 
-    return listOf(
-        Picture(R.drawable.laptops),
-        Picture(R.drawable.laptops),
-        Picture(R.drawable.laptops),
-        Picture(R.drawable.laptops),
-    )
+    return pictures
 }
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
