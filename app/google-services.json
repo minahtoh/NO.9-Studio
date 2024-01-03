@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "402752941314",
+    "project_id": "no9-studio",
+    "storage_bucket": "no9-studio.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:402752941314:android:ec9219227fb29b06c2661b",
+        "android_client_info": {
+          "package_name": "com.example.no9studio"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCFl2jiS7zea2wS7TNgF1jsEb6Vwg_ZuqQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

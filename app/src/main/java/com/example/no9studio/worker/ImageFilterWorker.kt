@@ -1,9 +1,12 @@
 package com.example.no9studio.worker
 
+import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.provider.MediaStore
+import androidx.core.content.FileProvider
 import androidx.core.net.toFile
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -14,6 +17,7 @@ import com.example.no9studio.viewmodel.StudioViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.OutputStream
 
 class ImageFilterWorker(context: Context, workerParams: WorkerParameters)
     : CoroutineWorker(context, workerParams) {
@@ -45,12 +49,13 @@ class ImageFilterWorker(context: Context, workerParams: WorkerParameters)
             filteredBitmap = originalBitmap?.let { applyFilter(it, filterType) }
 
             // Save both original and filtered images
-            val originalUri = originalBitmap?.let { saveBitmap(it, "original") }
-            val filteredUri = filteredBitmap?.let { saveBitmap(it, "filtered") }
+           // val originalUri = originalBitmap?.let { saveBitmap(it, "original") }
+            val filteredUri = filteredBitmap?.let { saveBitmapUri(it, "filtered") }
+            val unsavedFilteredUri = filteredBitmap?.let { getUriFromUnsavedImage(it) }
 
             // Pass the URIs to the result
             val outputData = workDataOf(
-                KEY_ORIGINAL_URI to originalUri.toString(),
+               // KEY_ORIGINAL_URI to originalUri.toString(),
                 KEY_FILTERED_URI to filteredUri.toString()
             )
             Result.success(outputData)
@@ -73,6 +78,19 @@ class ImageFilterWorker(context: Context, workerParams: WorkerParameters)
         }
     }
 
+    private fun getUriFromUnsavedImage(bitmap: Bitmap): Uri {
+        val context = applicationContext
+
+        val dummyFilePath = File(context.cacheDir, "dummy_image.jpg")
+
+        // Compress and save the bitmap to the dummy file path
+        bitmap.compress(Bitmap.CompressFormat.PNG, 70, dummyFilePath.outputStream())
+
+        // Use FileProvider to get the content URI
+       // return FileProvider.getUriForFile(context, context.packageName + ".provider", dummyFilePath)
+        return Uri.fromFile(dummyFilePath)
+    }
+
     private fun saveBitmap(bitmap: Bitmap, prefix: String): Uri {
         val outputDir = File(applicationContext.filesDir, FILTERED_IMAGES_DIR)
         if (!outputDir.exists()) {
@@ -82,6 +100,28 @@ class ImageFilterWorker(context: Context, workerParams: WorkerParameters)
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputFile.outputStream())
 
         return Uri.fromFile(outputFile)
+    }
+
+    private fun saveBitmapUri(bitmap: Bitmap, prefix: String): Uri {
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, "$prefix ${System.currentTimeMillis()}.png")
+            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+            // Specify the directory where you want to save the image (e.g., Pictures/YourApp)
+            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/NO.9 Studio")
+        }
+
+        val resolver = applicationContext.contentResolver
+        val contentUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val imageUri = resolver.insert(contentUri, values)
+
+        imageUri?.let { safeUri ->
+            resolver.openOutputStream(safeUri)?.use { outputStream: OutputStream ->
+                // Save the bitmap to the output stream
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+            }
+        }
+
+        return imageUri ?: Uri.EMPTY
     }
 
     companion object {

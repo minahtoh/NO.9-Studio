@@ -51,6 +51,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -61,35 +62,45 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModelProvider
 import coil.compose.rememberImagePainter
 import com.canhub.cropper.CropImageContract
 import com.canhub.cropper.CropImageView
 import com.canhub.cropper.options
+import com.example.no9studio.db.LabsDatabase
 import com.example.no9studio.filters.FilterType
 import com.example.no9studio.model.CropRatio
+import com.example.no9studio.model.DownloadableFilter
 import com.example.no9studio.model.Picture
 import com.example.no9studio.navigation.AppNavigation
 import com.example.no9studio.navigation.Screen
+import com.example.no9studio.ui.common.FilterDialog
 import com.example.no9studio.ui.common.LoadingAnimation
 import com.example.no9studio.ui.common.getCropRatios
 import com.example.no9studio.ui.common.getNavigationItems
 import com.example.no9studio.ui.theme.NO9StudioTheme
+import com.example.no9studio.viewmodel.LabsRepository
 import com.example.no9studio.viewmodel.StudioViewModel
+import com.example.no9studio.viewmodel.StudioViewModelFactory
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
-    private val viewModel : StudioViewModel by viewModels()
+    private lateinit var viewModel : StudioViewModel
+
 
     private val galleryLauncher: ActivityResultLauncher<Intent> =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK) {
                    result.data?.data?.let { uri ->
-                    // Handle the selected image URI
-                   // selectedImageUri = uri
-                       viewModel.selectImageForFilter(uri)
+
+                       viewModel.apply {
+                           selectDisplayImageForFilter(uri)
+                           selectImageForFilterWorker(uri)
+                           getLabBitmap(this@MainActivity,uri)
+                       }
                    }
             }
         }
@@ -99,7 +110,10 @@ class MainActivity : ComponentActivity() {
         if (result.isSuccessful){
             val croppedImage = result.uriContent
             if (croppedImage != null){
-                viewModel.selectImageForFilter(croppedImage)
+                viewModel.apply {
+                    selectImageForFilterWorker(croppedImage)
+                    selectDisplayImageForFilter(croppedImage)
+                }
             }
         }else{
             Toast.makeText(this,"Crop image failed due to ${result.error}",Toast.LENGTH_SHORT)
@@ -123,6 +137,13 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+
+        //        For viewModel implementation
+        val labsRepository = LabsRepository(LabsDatabase.getDatabase(this))
+        val labsProvider = StudioViewModelFactory(labsRepository)
+        viewModel = ViewModelProvider(this, labsProvider)[StudioViewModel::class.java]
+
+        viewModel.getLabsFilters(this@MainActivity)
     }
 
 
@@ -144,6 +165,7 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+
 }
 
 
@@ -157,7 +179,10 @@ fun StudioBaseScreen(
     onNavigationItemClick: (String) -> Unit,
     currentScreen : Screen,
     cropImageToRatio : (String) -> Unit,
-    content: @Composable (PaddingValues) -> Unit,
+    applyLabsFilters : (DownloadableFilter) -> Unit,
+    labsFilterImage : Bitmap?,
+    labsFilterList : List<DownloadableFilter>,
+    content: @Composable (PaddingValues) -> Unit
 ){
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -165,6 +190,11 @@ fun StudioBaseScreen(
     var selectedNavItemIndex  by rememberSaveable {
         mutableStateOf(0)
     }
+    var showDialog by remember{ mutableStateOf(false) }
+    var startExistingFilterWork by remember {
+        mutableStateOf(false)
+    }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
@@ -219,7 +249,7 @@ fun StudioBaseScreen(
                         FilterGallery(
                             selectedImage = selectedImageUri,
                             onActionClick = {
-                                applyFilters(FilterType.valueOf(it))
+                                    applyFilters(FilterType.valueOf(it))
                             }
                         )
                     }else if (selectedImageUri != null && currentScreen == Screen.Crop){
@@ -227,10 +257,23 @@ fun StudioBaseScreen(
                             selectedImage = selectedImageUri,
                             onActionClick = cropImageToRatio
                         )
+                    }else if (selectedImageUri != null && currentScreen == Screen.Labs){
+                        LabsGallery(
+                            selectedImage = labsFilterImage,
+                            filterList = labsFilterList,
+                            onActionClick = applyLabsFilters
+                        )
                     }
-                },
+                            },
                 content = {
                     content(it)
+                    if(showDialog){
+                        FilterDialog(
+                            handleOnExistingFilter = { startExistingFilterWork = true},
+                            handleOnOriginalImage = {},
+                            onDismiss = {showDialog = false}
+                        )
+                    }
                 }
             )
         }
@@ -274,6 +317,16 @@ fun CropGallery(selectedImage: Uri?, onActionClick: (String) -> Unit){
         }
     }
 }
+@Composable
+fun LabsGallery(selectedImage: Bitmap?, filterList: List<DownloadableFilter>, onActionClick: (DownloadableFilter) -> Unit){
+    LazyRow(modifier = Modifier
+        .padding(5.dp)
+        .fillMaxWidth()) {
+        items(filterList.size) {
+            LabsFilter(selectedImage,filterList[it],onActionClick)
+        }
+    }
+}
 
 @Composable
 fun ImageFilter(selectedImage: Uri?, filterType: String, onClick: (String) -> Unit){
@@ -302,6 +355,33 @@ fun ImageFilter(selectedImage: Uri?, filterType: String, onClick: (String) -> Un
     Spacer(modifier = Modifier.width(5.dp))
 
 }
+@Composable
+fun LabsFilter(selectedImage: Bitmap?, filterType: DownloadableFilter, onClick: (DownloadableFilter) -> Unit){
+    Card(
+        modifier = Modifier
+            .width(120.dp)
+            .padding(8.dp)
+            .clickable { onClick(filterType) },
+        shape = RoundedCornerShape(0.dp),
+    ){
+        Image(
+                painter = rememberImagePainter(data = selectedImage),
+                contentDescription = null,
+                modifier = Modifier
+                    .width(64.dp)
+                    .height(64.dp),
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.Center,
+                )
+        Text(
+                text = filterType.filterName.lowercase(Locale.getDefault()),
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                textAlign = TextAlign.Center
+                )
+    }
+    Spacer(modifier = Modifier.width(5.dp))
+
+}
 
 @Composable
 fun NO9StudioApp(
@@ -312,6 +392,7 @@ fun NO9StudioApp(
     val context = LocalContext.current
     // Fetch recent pictures from the device
     val recentPictures = getRecentPictures(context)
+    Log.d("StartTag", "NO9StudioApp: $recentPictures")
     if (selectedImage == null){
         // Display the list of recent pictures using LazyColumn
         LazyVerticalGrid(
@@ -354,6 +435,46 @@ fun RecentPictureItem(picture: Picture) {
     }
 }
 
+fun getLastSavedImages(context: Context, limit : Int): List<Uri>{
+    val uri: Uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+    val projection = arrayOf(
+        MediaStore.Images.Media._ID,
+        MediaStore.Images.Media.DATA,
+        MediaStore.Images.Media.DATE_ADDED
+    )
+
+    val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC LIMIT $limit"
+
+    context.contentResolver.query(uri, projection, null, null, sortOrder)?.use { cursor ->
+        val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+        val dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA)
+        val dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+
+        val imageList = mutableListOf<Uri>()
+
+        while (cursor.moveToNext()) {
+            val id = cursor.getLong(idColumn)
+            val data = cursor.getString(dataColumn)
+            val dateAdded = cursor.getLong(dateAddedColumn)
+
+            val contentUri: Uri = ContentUris.withAppendedId(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                id
+            )
+
+            // You can use 'contentUri' to get the image Uri
+            imageList.add(contentUri)
+
+            // If you need additional information, you can use 'data', 'dateAdded', etc.
+        }
+
+        return imageList
+    }
+
+    // Return an empty list if no images are found
+    return emptyList()
+}
+
 
 fun getRecentPictures(context: Context): List<Picture> {
 
@@ -381,10 +502,14 @@ fun getRecentPictures(context: Context): List<Picture> {
     // List to store the fetched pictures
     val pictures = mutableListOf<Picture>()
 
+    Log.d("Help me", "getRecentPictures: Before Cursor")
+
     cursor?.use { c ->
         // Retrieve the column indices
         val idColumn = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
         val displayNameColumn = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+
+        Log.d("Help me", "getRecentPictures: Inside Cursor")
 
         // Iterate through the cursor and create Picture objects
         while (c.moveToNext()) {

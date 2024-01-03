@@ -2,6 +2,10 @@ package com.example.no9studio.filters
 
 import android.graphics.Bitmap
 import android.graphics.Color
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
 
 class ImageFilters {
     companion object {
@@ -31,6 +35,41 @@ class ImageFilters {
             return resultBitmap
         }
 
+        private fun applyFilter2(bitmap: Bitmap, filter: (Int, Int, Int) -> Int): Bitmap = runBlocking {
+            val width = bitmap.width
+            val height = bitmap.height
+
+            val deferredList = (0 until width).map { x ->
+                async(Dispatchers.Default) {
+                    (0 until height).map { y ->
+                        val pixel = bitmap.getPixel(x, y)
+                        val red = Color.red(pixel)
+                        val green = Color.green(pixel)
+                        val blue = Color.blue(pixel)
+
+                        val filteredColor = filter(red, green, blue)
+
+                        Color.rgb(
+                            Color.red(filteredColor),
+                            Color.green(filteredColor),
+                            Color.blue(filteredColor)
+                        )
+                    }
+                }
+            }
+
+            val resultBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+
+            deferredList.awaitAll().forEachIndexed { x, column ->
+                column.forEachIndexed { y, color ->
+                    resultBitmap.setPixel(x, y, color)
+                }
+            }
+
+            resultBitmap
+        }
+
+
         // Add more filter methods as needed
         fun applyGrayscale(bitmap: Bitmap): Bitmap {
             return applyFilter(bitmap) { red, green, blue ->
@@ -46,7 +85,7 @@ class ImageFilters {
         }
 
         fun applySepia(bitmap: Bitmap): Bitmap {
-            return applyFilter(bitmap) { red, green, blue ->
+            return applyFilter2(bitmap) { red, green, blue ->
                 val sepiaRed = (red * 0.393 + green * 0.769 + blue * 0.189).coerceIn(0.0, 255.0).toInt()
                 val sepiaGreen = (red * 0.349 + green * 0.686 + blue * 0.168).coerceIn(0.0, 255.0).toInt()
                 val sepiaBlue = (red * 0.272 + green * 0.534 + blue * 0.131).coerceIn(0.0, 255.0).toInt()
